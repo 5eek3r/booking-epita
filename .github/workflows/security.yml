@@ -16,9 +16,8 @@ jobs:
 
     - name: Install OSV Scanner
       run: |
-        curl -sSL https://github.com/google/osv-scanner/releases/latest/download/osv-scanner-linux-amd64.tar.gz | tar xz -C /usr/local/bin
-        chmod +x /usr/local/bin/osv-scanner-linux-amd64
-        mv /usr/local/bin/osv-scanner-linux-amd64 /usr/local/bin/osv-scanner
+        curl -sSL -o /usr/local/bin/osv-scanner https://github.com/google/osv-scanner/releases/latest/download/osv-scanner-linux-amd64
+        chmod +x /usr/local/bin/osv-scanner
 
     - name: Run OSV Scanner
       run: osv-scanner -o osv-scan-results.sarif .
@@ -27,3 +26,20 @@ jobs:
       uses: github/codeql-action/upload-sarif@v2
       with:
         sarif_file: ./osv-scan-results.sarif
+
+  SemgrepAnalysis:
+    runs-on: ubuntu-latest
+    container:
+      image: returntocorp/semgrep
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Run Semgrep with Java ruleset
+      run: semgrep --config p/java --sarif --output semgrep-results.sarif
+
+    - name: Upload Semgrep SARIF to Security Dashboard
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: semgrep-results.sarif
