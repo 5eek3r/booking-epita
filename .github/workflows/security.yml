@@ -2,7 +2,7 @@ name: Daily Security Pipeline
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # daily at midnight UTC
+    - cron: '0 0 * * *'  # runs daily at midnight UTC
   push:
     branches: [main]
 
@@ -14,8 +14,14 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
+    - name: Install OSV Scanner
+      run: |
+        curl -sSL https://github.com/google/osv-scanner/releases/latest/download/osv-scanner-linux-amd64.tar.gz | tar xz -C /usr/local/bin
+        chmod +x /usr/local/bin/osv-scanner-linux-amd64
+        mv /usr/local/bin/osv-scanner-linux-amd64 /usr/local/bin/osv-scanner
+
     - name: Run OSV Scanner
-      uses: google/osv-scanner-action@main
+      run: osv-scanner -o osv-scan-results.sarif .
 
     - name: Upload OSV SARIF report to Security Dashboard
       uses: github/codeql-action/upload-sarif@v2
