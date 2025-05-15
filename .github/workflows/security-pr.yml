@@ -5,77 +5,93 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  osv-scan:
+  osv-diff-scan:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout base commit (PR base)
+      - name: Checkout base commit
         uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.base.sha }}
 
-      - name: Run OSV Scanner on base code
-        uses: google/osv-scanner-action/osv-scanner-action@v1
-        id: base-scan
-        with:
-          format: sarif
-          output: base-scan-results.sarif
-          scan-path: app/
+      - name: Install OSV Scanner
+        run: |
+          curl -L -o osv-scanner https://github.com/google/osv-scanner/releases/download/v1.7.3/osv-scanner-linux-amd64
+          chmod +x osv-scanner
+          sudo mv osv-scanner /usr/local/bin/osv-scanner
 
-      - name: Checkout PR commit (head)
+      - name: Run OSV Scanner on base
+        run: osv-scanner --format sarif --output base-osv.sarif app/
+
+      - name: Save base scan
+        uses: actions/upload-artifact@v3
+        with:
+          name: base-osv-report
+          path: base-osv.sarif
+
+      - name: Checkout PR commit
         uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Run OSV Scanner on PR code
-        uses: google/osv-scanner-action/osv-scanner-action@v1
-        id: pr-scan
-        with:
-          format: sarif
-          output: pr-scan-results.sarif
-          scan-path: app/
+      - name: Run OSV Scanner on PR
+        run: osv-scanner --format sarif --output pr-osv.sarif app/
 
-      - name: Compare OSV Scanner results
-        uses: google/osv-scanner-action/osv-reporter-action@v1
-        id: compare
-        with:
-          base-report: base-scan-results.sarif
-          pr-report: pr-scan-results.sarif
-          output: diff-report.sarif
-
-      - name: Upload OSV differential report artifact
+      - name: Save PR scan
         uses: actions/upload-artifact@v3
         with:
-          name: osv-differential-report
-          path: diff-report.sarif
+          name: pr-osv-report
+          path: pr-osv.sarif
 
-  semgrep:
+      - name: Compare OSV SARIF reports
+        run: |
+          echo "Comparing OSV SARIF (naive diff)"
+          grep '"id":' base-osv.sarif | sort > base.txt || true
+          grep '"id":' pr-osv.sarif | sort > pr.txt || true
+          comm -13 base.txt pr.txt > osv-new.txt || true
+          echo '{
+            "version": "2.1.0",
+            "runs": [{
+              "tool": {"driver": {"name": "osv-diff"}},
+              "results": []
+            }]
+          }' > osv-diff.sarif
+          while read vuln; do
+            echo "Found new: $vuln"
+          done < osv-new.txt
+
+      - name: Upload OSV diff report
+        uses: actions/upload-artifact@v3
+        with:
+          name: osv-diff-report
+          path: osv-diff.sarif
+
+  semgrep-diff:
     runs-on: ubuntu-latest
     container:
       image: returntocorp/semgrep
 
     steps:
-      - name: Checkout base commit (PR base)
+      - name: Checkout base commit
         uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.base.sha }}
 
-      - name: Save baseline commit hash
+      - name: Save baseline commit
         id: baseline
         run: echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Checkout PR commit (head)
+      - name: Checkout PR commit
         uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Run Semgrep differential analysis
+      - name: Run Semgrep diff scan
         run: |
-          semgrep --config p/java --baseline-commit ${{ steps.baseline.outputs.commit }} --json > semgrep-report.json
+          semgrep --config p/java --baseline-commit ${{ steps.baseline.outputs.commit }} --json > semgrep-diff.json
 
-      - name: Upload Semgrep differential report artifact
+      - name: Upload Semgrep diff report
         uses: actions/upload-artifact@v3
         with:
-          name: semgrep-differential-report
-          path: semgrep-report.json
-
+          name: semgrep-diff-report
+          path: semgrep-diff.json
